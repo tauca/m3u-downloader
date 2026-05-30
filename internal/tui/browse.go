@@ -382,7 +382,7 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 			return m.drillOut()
 		case " ":
 			return m.queueSelected()
-		case "s":
+		case "o":
 			// Toggle sort order
 			m.sortOrder = cycleSortOrder(m.sortOrder)
 			// Refresh items with new sort order if we're viewing items
@@ -537,7 +537,7 @@ func (m browseModel) View(w, h int) string {
 	if m.level == levelItems {
 		sortLabel = fmt.Sprintf(" [sort: %s]", sortOrderLabel(m.sortOrder))
 	}
-	footer := statusBar.Render(fmt.Sprintf("level: %d   %s   q queue • enter drill • esc back • space queue • s sort%s • ctrl+c quit",
+	footer := statusBar.Render(fmt.Sprintf("level: %d   %s   q queue • enter drill • esc back • space queue • o order%s • ctrl+c quit",
 		m.level, m.statusMsg, sortLabel))
 	return lipgloss.JoinVertical(lipgloss.Left, main, footer)
 }
