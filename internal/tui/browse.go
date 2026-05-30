@@ -44,6 +44,9 @@ type browseModel struct {
 	// auto-load the highlighted category into the items pane.
 	previewedCatID int
 
+	// sortOrder controls how items are sorted
+	sortOrder store.SortOrder
+
 	statusMsg string
 }
 
@@ -127,6 +130,7 @@ func newBrowseModel(st *store.Store, xc *xtream.Client, moviesDir, seriesDir str
 		items:     mk("Items"),
 		seasons:   mk("Seasons"),
 		episodes:  mk("Episodes"),
+		sortOrder: store.SortNameAsc, // default sort order
 	}
 }
 
@@ -191,12 +195,12 @@ func loadCategoriesCmd(st *store.Store, xc *xtream.Client) tea.Cmd {
 	}
 }
 
-func loadItemsCmd(st *store.Store, xc *xtream.Client, cat store.CategoryRow) tea.Cmd {
+func loadItemsCmd(st *store.Store, xc *xtream.Client, cat store.CategoryRow, sortOrder store.SortOrder) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		switch cat.Type {
 		case "vod":
-			vods, _ := st.ListVODs(ctx, cat.ID)
+			vods, _ := st.ListVODsSorted(ctx, cat.ID, sortOrder)
 			if len(vods) == 0 || cat.FetchedAt == 0 {
 				api, err := xc.GetVODStreams(ctx, fmt.Sprint(cat.ID))
 				if err != nil {
@@ -214,11 +218,11 @@ func loadItemsCmd(st *store.Store, xc *xtream.Client, cat store.CategoryRow) tea
 				}
 				_ = st.UpsertVODs(ctx, rows)
 				_ = st.MarkCategoryFetched(ctx, cat.ID)
-				vods, _ = st.ListVODs(ctx, cat.ID)
+				vods, _ = st.ListVODsSorted(ctx, cat.ID, sortOrder)
 			}
 			return itemsLoadedMsg{vods: vods}
 		case "series":
-			ser, _ := st.ListSeries(ctx, cat.ID)
+			ser, _ := st.ListSeriesSorted(ctx, cat.ID, sortOrder)
 			if len(ser) == 0 || cat.FetchedAt == 0 {
 				api, err := xc.GetSeries(ctx, fmt.Sprint(cat.ID))
 				if err != nil {
@@ -237,7 +241,7 @@ func loadItemsCmd(st *store.Store, xc *xtream.Client, cat store.CategoryRow) tea
 				}
 				_ = st.UpsertSeries(ctx, rows)
 				_ = st.MarkCategoryFetched(ctx, cat.ID)
-				ser, _ = st.ListSeries(ctx, cat.ID)
+				ser, _ = st.ListSeriesSorted(ctx, cat.ID, sortOrder)
 			}
 			return itemsLoadedMsg{series: ser}
 		}
@@ -260,6 +264,44 @@ func loadEpisodesCmd(st *store.Store, seriesID, season int) tea.Cmd {
 		eps, _ := st.ListEpisodes(context.Background(), seriesID, season)
 		return seriesInfoLoadedMsg{episodes: eps}
 	}
+}
+
+// sortOrderLabel returns a short label for the current sort order
+func sortOrderLabel(order store.SortOrder) string {
+	switch order {
+	case store.SortNameAsc:
+		return "A-Z"
+	case store.SortNameDesc:
+		return "Z-A"
+	case store.SortRatingDesc:
+		return "↓ Rating"
+	case store.SortRatingAsc:
+		return "↑ Rating"
+	case store.SortRecent:
+		return "Recent"
+	case store.SortOld:
+		return "Old"
+	default:
+		return "A-Z"
+	}
+}
+
+// cycleSortOrder moves to the next sort order
+func cycleSortOrder(current store.SortOrder) store.SortOrder {
+	orders := []store.SortOrder{
+		store.SortNameAsc,
+		store.SortNameDesc,
+		store.SortRatingDesc,
+		store.SortRatingAsc,
+		store.SortRecent,
+		store.SortOld,
+	}
+	for i, o := range orders {
+		if o == current {
+			return orders[(i+1)%len(orders)]
+		}
+	}
+	return store.SortNameAsc
 }
 
 // --- update / view ---
@@ -286,7 +328,7 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 		if ci, ok := m.cats.SelectedItem().(catItem); ok && m.previewedCatID == 0 {
 			m.previewedCatID = ci.row.ID
 			m.currentCategory = ci.row
-			return m, loadItemsCmd(m.store, m.xc, ci.row)
+			return m, loadItemsCmd(m.store, m.xc, ci.row, m.sortOrder)
 		}
 		return m, nil
 	case itemsLoadedMsg:
@@ -340,6 +382,16 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 			return m.drillOut()
 		case " ":
 			return m.queueSelected()
+		case "s":
+			// Toggle sort order
+			oldSort := m.sortOrder
+			m.sortOrder = cycleSortOrder(m.sortOrder)
+			// Refresh items with new sort order if we're viewing items
+			if m.level == levelItems && m.currentCategory.ID != 0 {
+				return m, loadItemsCmd(m.store, m.xc, m.currentCategory, m.sortOrder)
+			}
+			m.statusMsg = fmt.Sprintf("Sort: %s", sortOrderLabel(m.sortOrder))
+			return m, nil
 		case "r":
 			if m.level == levelCategories {
 				return m, loadCategoriesCmd(m.store, m.xc)
@@ -347,7 +399,7 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 			if m.currentCategory.ID != 0 {
 				cat := m.currentCategory
 				cat.FetchedAt = 0
-				return m, loadItemsCmd(m.store, m.xc, cat)
+				return m, loadItemsCmd(m.store, m.xc, cat, m.sortOrder)
 			}
 		}
 	}
@@ -361,7 +413,7 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 		if ci, ok := m.cats.SelectedItem().(catItem); ok && ci.row.ID != m.previewedCatID {
 			m.previewedCatID = ci.row.ID
 			m.currentCategory = ci.row
-			cmd = tea.Batch(cmd, loadItemsCmd(m.store, m.xc, ci.row))
+			cmd = tea.Batch(cmd, loadItemsCmd(m.store, m.xc, ci.row, m.sortOrder))
 		}
 	case levelItems:
 		m.items, cmd = m.items.Update(msg)
@@ -401,7 +453,7 @@ func (m browseModel) drillIn() (browseModel, tea.Cmd) {
 		var cmd tea.Cmd
 		if m.previewedCatID != ci.row.ID {
 			m.previewedCatID = ci.row.ID
-			cmd = loadItemsCmd(m.store, m.xc, ci.row)
+			cmd = loadItemsCmd(m.store, m.xc, ci.row, m.sortOrder)
 		}
 		m.level = levelItems
 		return m, cmd
@@ -437,7 +489,7 @@ func (m browseModel) queueSelected() (browseModel, tea.Cmd) {
 			err := catalog.EnqueueVOD(ctx, m.store, cfg, it.row)
 			m.statusMsg = friendlyEnqueueMsg("queued movie", err)
 			if err == nil && m.currentCategory.ID != 0 {
-				refreshCmd = loadItemsCmd(m.store, m.xc, m.currentCategory)
+				refreshCmd = loadItemsCmd(m.store, m.xc, m.currentCategory, m.sortOrder)
 			}
 		case seriesItem:
 			n, err := catalog.EnqueueSeries(ctx, m.store, m.xc, cfg, it.row)
@@ -482,7 +534,11 @@ func (m browseModel) View(w, h int) string {
 	}
 	rightPane := pane.Width(rightWidth).Height(h - 3).Render(right)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
-	footer := statusBar.Render(fmt.Sprintf("level: %d   %s   q queue • enter drill • esc back • space queue • ctrl+c quit",
-		m.level, m.statusMsg))
+	sortLabel := ""
+	if m.level == levelItems {
+		sortLabel = fmt.Sprintf(" [sort: %s]", sortOrderLabel(m.sortOrder))
+	}
+	footer := statusBar.Render(fmt.Sprintf("level: %d   %s   q queue • enter drill • esc back • space queue • s sort%s • ctrl+c quit",
+		m.level, m.statusMsg, sortLabel))
 	return lipgloss.JoinVertical(lipgloss.Left, main, footer)
 }
