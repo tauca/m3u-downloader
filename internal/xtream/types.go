@@ -1,5 +1,10 @@
 package xtream
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // Category is shared across live/vod/series — only `type` differs.
 type Category struct {
 	CategoryID   string `json:"category_id"`
@@ -7,19 +12,39 @@ type Category struct {
 	ParentID     int    `json:"parent_id"`
 }
 
+// FlexibleString unmarshals both JSON strings and numbers into a string.
+// This handles providers that inconsistently return rating as "8.5" vs 8.5.
+type FlexibleString string
+
+func (fs *FlexibleString) UnmarshalJSON(b []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch val := v.(type) {
+	case string:
+		*fs = FlexibleString(val)
+	case float64:
+		*fs = FlexibleString(fmt.Sprintf("%v", val))
+	case nil:
+		*fs = ""
+	default:
+		return fmt.Errorf("cannot unmarshal %T into FlexibleString", v)
+	}
+	return nil
+}
+
 // VOD represents a movie entry from get_vod_streams.
-// Rating stays a string because the provider returns "" for missing values,
-// which json.Number rejects.
 type VOD struct {
-	StreamID           int    `json:"stream_id"`
-	Name               string `json:"name"`
-	StreamIcon         string `json:"stream_icon"`
-	Rating             string `json:"rating"`
-	Year               string `json:"year"`
-	Added              string `json:"added"`
-	CategoryID         string `json:"category_id"`
-	ContainerExtension string `json:"container_extension"`
-	Plot               string `json:"plot"`
+	StreamID           int            `json:"stream_id"`
+	Name               string         `json:"name"`
+	StreamIcon         string         `json:"stream_icon"`
+	Rating             FlexibleString `json:"rating"`
+	Year               string         `json:"year"`
+	Added              string         `json:"added"`
+	CategoryID         string         `json:"category_id"`
+	ContainerExtension string         `json:"container_extension"`
+	Plot               string         `json:"plot"`
 }
 
 // SeriesListing is what get_series returns: the show, not its seasons.
