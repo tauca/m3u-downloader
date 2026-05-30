@@ -384,7 +384,6 @@ func (m browseModel) Update(msg tea.Msg) (browseModel, tea.Cmd) {
 			return m.queueSelected()
 		case "s":
 			// Toggle sort order
-			oldSort := m.sortOrder
 			m.sortOrder = cycleSortOrder(m.sortOrder)
 			// Refresh items with new sort order if we're viewing items
 			if m.level == levelItems && m.currentCategory.ID != 0 {
