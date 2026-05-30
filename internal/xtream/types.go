@@ -34,6 +34,38 @@ func (fs *FlexibleString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// FlexibleStringArray unmarshals both JSON strings and arrays into []string.
+// This handles providers that inconsistently return backdrop_path as a string or array.
+type FlexibleStringArray []string
+
+func (fsa *FlexibleStringArray) UnmarshalJSON(b []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch val := v.(type) {
+	case string:
+		if val != "" {
+			*fsa = FlexibleStringArray{val}
+		} else {
+			*fsa = FlexibleStringArray{}
+		}
+	case []interface{}:
+		arr := make([]string, 0, len(val))
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				arr = append(arr, s)
+			}
+		}
+		*fsa = FlexibleStringArray(arr)
+	case nil:
+		*fsa = FlexibleStringArray{}
+	default:
+		return fmt.Errorf("cannot unmarshal %T into FlexibleStringArray", v)
+	}
+	return nil
+}
+
 // VOD represents a movie entry from get_vod_streams.
 type VOD struct {
 	StreamID           int            `json:"stream_id"`
@@ -49,22 +81,22 @@ type VOD struct {
 
 // SeriesListing is what get_series returns: the show, not its seasons.
 type SeriesListing struct {
-	SeriesID    int      `json:"series_id"`
-	Name        string   `json:"name"`
-	Cover       string   `json:"cover"`
-	Plot        string   `json:"plot"`
-	ReleaseDate string   `json:"releaseDate"`
-	CategoryID  string   `json:"category_id"`
-	Backdrop    []string `json:"backdrop_path"`
+	SeriesID    int                 `json:"series_id"`
+	Name        string              `json:"name"`
+	Cover       string              `json:"cover"`
+	Plot        string              `json:"plot"`
+	ReleaseDate string              `json:"releaseDate"`
+	CategoryID  string              `json:"category_id"`
+	Backdrop    FlexibleStringArray `json:"backdrop_path"`
 }
 
 // SeriesInfo is the get_series_info response: seasons + episodes.
 type SeriesInfo struct {
 	Info struct {
-		Name     string   `json:"name"`
-		Cover    string   `json:"cover"`
-		Plot     string   `json:"plot"`
-		Backdrop []string `json:"backdrop_path"`
+		Name     string              `json:"name"`
+		Cover    string              `json:"cover"`
+		Plot     string              `json:"plot"`
+		Backdrop FlexibleStringArray `json:"backdrop_path"`
 	} `json:"info"`
 	Seasons []struct {
 		SeasonNumber int    `json:"season_number"`
